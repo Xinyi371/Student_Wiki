@@ -1,0 +1,140 @@
+---
+title: "Assignment #2 DEG"
+author: "Xinyi Zhang"
+data: "02/13/2022"
+output: html_document
+---
+The normlized input matrix is from assignment 1.
+
+```{r}
+library(edgeR)
+load("as1.RData")
+normalized_counts<-normalized_counts[,c(4,5,6,1,2,3)]
+group<-rep(c('control','treat'),each=3)
+
+d <- DGEList(counts=normalized_counts,group=group)
+design<-model.matrix(~group)
+
+dge <- estimateDisp(d, design, robust = TRUE)
+
+fit <- glmQLFit(dge, design, robust = TRUE)
+lrt <- topTags(glmQLFTest(fit), n = nrow(d$counts))
+res<-data.frame(lrt)
+sigres<-res[res$FDR<0.05 & abs(res$logFC)>2,]
+```
+
+Now, generatet the volcano plot for the DEGs.
+
+```{r}
+library(ggplot2)
+res$color<-"None"
+res$color[res$logFC >  2 & res$FDR<0.05]<-"up"
+res$color[res$logFC < -2 & res$FDR<0.05]<-"dn"
+ggplot(res,aes(x=logFC,y= -log10(FDR),color=color))+
+  geom_point()+
+  scale_color_manual(values = c('red', 'gray', 'green'), limits = c('up', 'None', 'dn'))+
+  labs(x = 'log2 Fold Change', y = '-log10 FDR', title = 'control vs treat', color = '')+theme(plot.title = element_text(hjust = 0.5, size = 14), panel.grid = element_blank(), 
+    panel.background = element_rect(color = 'black', fill = 'transparent'), 
+    legend.key = element_rect(fill = 'transparent')) +
+geom_vline(xintercept = c(-2, 2), lty = 3, color = 'black') +  
+geom_hline(yintercept = -log10(0.05), lty = 3, color = 'black') 
+```
+
+Now, we generate the heatmap of DEGs.
+
+```{r}
+mat<-data.frame(normalized_counts)
+head(mat)
+mat$gene<-rownames(mat)
+sigres$gene<-rownames(sigres)
+
+mat<-merge(mat,sigres,by="gene",all=FALSE)
+rownames(mat)<-mat$gene
+colnames(mat)
+mat[,c(1,8,9,10,11,12)]<-NULL
+
+library(gplots)
+library(RColorBrewer)
+
+my_palette <- colorRampPalette(c("red", "yellow", "green"))(n = 100)
+col_breaks = c(seq(-1,0,length=100),  # for red
+  seq(0.01,0.8,length=100),           # for yellow
+  seq(0.81,1,length=100)) 
+heatmap.2(as.matrix(mat),  main = "DEG Heatmap", notecol="black",      
+  density.info="none",  trace="none", margins =c(12,9), scale="row",    
+  col=my_palette, dendrogram="row",  Colv="NA")   
+```
+
+Now we do the GSEA analysis of the DEGs.
+
+```{r}
+library(org.Hs.eg.db)
+library(clusterProfiler)
+library(biomaRt)
+library(tidyverse)
+
+sigall<-sigres
+sigall$Gene<-rownames(sigall)
+sigall<-sigall[,c(7,1)]
+genename <- as.character(sigall[,1])
+gene_map <- AnnotationDbi::select(org.Hs.eg.db, keys=genename, keytype="SYMBOL", columns=c("ENTREZID"))
+colnames(gene_map)[1]<-"Gene"
+sigall<-inner_join(gene_map,sigall,by = "Gene")
+sigall$Gene<-NULL
+sigall<-na.omit(sigall)
+sigall$logFC<-sort(sigall$logFC,decreasing = T)
+geneList = sigall[,2]
+names(geneList) = as.character(sigall[,1])
+
+Go_gseresult <- gseGO(geneList, 'org.Hs.eg.db', keyType = "ENTREZID", ont="all", nPerm = 1000, minGSSize = 10, maxGSSize = 1000, pvalueCutoff=1)
+
+GO_all<-data.frame(Go_gseresult)
+GO_all<-GO_all[GO_all$p.adjust<0.05,]
+head(GO_all)
+```
+
+Repeat the process for up regulated genes and down regulated genes.
+
+```{r}
+sigall<-sigres[sigres$logFC > 0,]
+sigall$Gene<-rownames(sigall)
+sigall<-sigall[,c(7,1)]
+genename <- as.character(sigall[,1])
+gene_map <- AnnotationDbi::select(org.Hs.eg.db, keys=genename, keytype="SYMBOL", columns=c("ENTREZID"))
+colnames(gene_map)[1]<-"Gene"
+sigall<-inner_join(gene_map,sigall,by = "Gene")
+sigall$Gene<-NULL
+sigall<-na.omit(sigall)
+sigall$logFC<-sort(sigall$logFC,decreasing = T)
+geneList = sigall[,2]
+names(geneList) = as.character(sigall[,1])
+
+Go_gseresult <- gseGO(geneList, 'org.Hs.eg.db', keyType = "ENTREZID", ont="all", nPerm = 1000, minGSSize = 10, maxGSSize = 1000, pvalueCutoff=1)
+
+GO_up<-data.frame(Go_gseresult)
+GO_up<-GO_up[GO_up$p.adjust<0.05,]
+head(GO_up)
+```
+
+
+```{r}
+sigall<-sigres[sigres$logFC < 0,]
+sigall$Gene<-rownames(sigall)
+sigall<-sigall[,c(7,1)]
+genename <- as.character(sigall[,1])
+gene_map <- AnnotationDbi::select(org.Hs.eg.db, keys=genename, keytype="SYMBOL", columns=c("ENTREZID"))
+colnames(gene_map)[1]<-"Gene"
+sigall<-inner_join(gene_map,sigall,by = "Gene")
+sigall$Gene<-NULL
+sigall<-na.omit(sigall)
+sigall$logFC<-sort(sigall$logFC,decreasing = T)
+geneList = sigall[,2]
+names(geneList) = as.character(sigall[,1])
+
+Go_gseresult <- gseGO(geneList, 'org.Hs.eg.db', keyType = "ENTREZID", ont="all", nPerm = 1000, minGSSize = 10, maxGSSize = 1000, pvalueCutoff=1)
+
+GO_dn<-data.frame(Go_gseresult)
+GO_dn<-GO_up[GO_up$p.adjust<0.05,]
+head(GO_dn)
+```
+
